@@ -1,0 +1,72 @@
+╔══════════════════════════════════════════════════════════╗
+║        UNSPED Karbon Ayak İzi Sistemi                   ║
+║        Kurulum ve Kullanım Kılavuzu                     ║
+╚══════════════════════════════════════════════════════════╝
+
+━━━ KLASÖR YAPISI ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+carbon_project/
+├── BASLAT.bat              ← Dashboard'u aç (çift tıkla!)
+├── GUNCELLE.bat            ← Emisyon faktörlerini güncelle
+├── IMPORT_ET.bat           ← Excel'i sisteme aktar
+├── BENIOKU.txt             ← Bu dosya
+├── dashboard.py            ← Dashboard (otomatik açılır)
+├── main.py                 ← İlk kurulum (BASLAT.bat yapar)
+├── run_update.py           ← Faktör güncelleme
+├── data/
+│   └── UNSPED_Karbon_Veri_Girisi_v3.xlsx  ← Excel şablonu
+├── pipeline/
+│   └── Importer.py         ← Import motoru
+├── db/
+│   ├── connection.py
+│   └── models.py
+└── carbon.db               ← Veritabanı (otomatik oluşur)
+
+━━━ İLK KURULUM ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Python kurulu değilse: https://www.python.org/downloads/
+   (Kurulum sırasında "Add python.exe to PATH" kutusunu işaretleyin!)
+
+2. BASLAT.bat dosyasına çift tıklayın.
+   → Tüm paketler otomatik kurulur
+   → Veritabanı otomatik oluşturulur
+   → Dashboard açılır
+
+━━━ GÜNLÜK KULLANIM ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Her gün / her kullanımda:
+   BASLAT.bat → çift tıkla → Dashboard açılır
+
+━━━ YILLIK İŞ AKIŞI ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Haziran-Temmuz'da:
+   GUNCELLE.bat → çift tıkla
+   (DEFRA yeni faktörlerini yayınlayınca otomatik indirir)
+
+2. Veriler hazır olunca:
+   Excel şablonunu (data/ klasöründe) doldurun
+   MAVİ hücreleri siz doldurun
+   YEŞİL hücreler otomatik dolar
+
+3. Import:
+   IMPORT_ET.bat → çift tıkla
+   VEYA Dashboard'dan "Veri İmport" sayfasını kullanın
+
+4. Sonuçlar:
+   Dashboard → "Sonuçlar & Grafik" sayfası
+
+━━━ SORUN GİDERME ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+"Python bulunamadı" hatası:
+→ https://www.python.org/downloads/ adresinden Python indirin
+→ Kurulum sırasında "Add python.exe to PATH" kutusunu işaretleyin
+
+"Paket kurulamadı" hatası:
+→ İnternet bağlantınızı kontrol edin
+→ Şirket güvenlik duvarı engelliyor olabilir
+
+"DB bağlantısı kurulamadı":
+→ carbon_project klasöründe BASLAT.bat'ı çalıştırın
+→ carbon.db dosyası otomatik oluşacak
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
