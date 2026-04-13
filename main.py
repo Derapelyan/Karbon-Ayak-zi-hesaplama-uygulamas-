@@ -5,19 +5,26 @@ Run this ONCE on a new machine to initialize the database.
     python main.py
 
 What it does:
-    1. Creates all tables in carbon.db
-    2. Creates UNSPED company + reporting periods
-    3. Seeds emission factors (IPCC, TEİAŞ)
-    4. Prints a summary to confirm everything is ready
+    1. Creates all DB tables
+    2. Creates UNSPED company + reporting periods (dynamic — last 2 years + current)
+    3. Prints confirmation
 
-After this, use the importer for annual data:
-    python pipeline/importer.py data/UNSPED_Karbon_Veri_Girisi_v3.xlsx 2024
+Emission factors come from the Excel green cells — NOT hardcoded here.
+To fill empty green cells automatically, run:
+    python run_update.py --excel data/UNSPED_Karbon_Veri_Girisi_v3.xlsx
+
+To import data after filling Excel:
+    python pipeline/Importer.py data/UNSPED_Karbon_Veri_Girisi_v3.xlsx
 """
 
+import sys
+import os
+from datetime import datetime
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from db.connection import engine, Base, SessionLocal
-from db.models import (
-    Company, ReportingPeriod, EmissionFactor, AuditLog
-)
+from db.models import Company, ReportingPeriod, AuditLog
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -27,199 +34,114 @@ from db.models import (
 def init_db():
     """Create all tables in carbon.db. Safe to run multiple times."""
     Base.metadata.create_all(engine)
-    print("✅ Veritabanı ve tablolar oluşturuldu.")
+    print("OK  Veritabani ve tablolar olusturuldu.")
 
 
 # ══════════════════════════════════════════════════════════════════
 # STEP 2 — COMPANY & REPORTING PERIODS
 # ══════════════════════════════════════════════════════════════════
 
+# Raporlamanın başladığı yıl — değiştirmeyin
+REPORTING_START_YEAR = 2023
+
+# Grafik/tablolarda gösterilecek maksimum yıl sayısı
+DISPLAY_YEARS = 3
+
 def setup_company():
-    """Create UNSPED company and annual reporting periods."""
+    """
+    Create UNSPED company and annual reporting periods.
+
+    Mantık:
+        - DB'de REPORTING_START_YEAR'dan (current_year - 1)'e kadar tüm yıllar tutulur
+        - current_year (2026 gibi) henüz bitmediği için oluşturulmaz
+        - Grafik/tablolarda sadece son DISPLAY_YEARS yıl gösterilir
+
+    Örnek (2026'da çalıştırılınca):
+        DB dönemleri → [2023, 2024, 2025]
+        Grafik        → [2023, 2024, 2025]  (son 3)
+
+    Örnek (2027'de çalıştırılınca):
+        DB dönemleri → [2023, 2024, 2025, 2026]
+        Grafik        → [2024, 2025, 2026]  (son 3)
+
+    Safe to run multiple times — skips already existing periods.
+    """
+    current_year = datetime.now().year
+    last_complete_year = current_year - 1  # bu yıl henüz bitmedi
+    years = list(range(REPORTING_START_YEAR, last_complete_year + 1))
+
     with SessionLocal() as session:
-        existing = session.query(Company).filter_by(name="UNSPED").first()
-        if existing:
-            print("ℹ️  UNSPED zaten mevcut, atlanıyor.")
-            return
 
-        company = Company(
-            name="UNSPED",
-            site="Ana Yerleşke - Makine Üretim Tesisi"
-        )
-        session.add(company)
-        session.flush()
+        # Get or create company
+        company = session.query(Company).filter_by(name="UNSPED").first()
+        if not company:
+            company = Company(
+                name="UNSPED",
+                site="Ana Yerleske - Makine Uretim Tesisi"
+            )
+            session.add(company)
+            session.flush()
+            print("OK  UNSPED sirketi olusturuldu.")
+        else:
+            print("--  UNSPED zaten mevcut.")
 
-        for year in [2023, 2024]:
-            session.add(ReportingPeriod(
+        # Create any missing periods
+        created = []
+        for year in years:
+            exists = session.query(ReportingPeriod).filter_by(
                 company_id=company.id,
                 year=year,
                 period="annual"
+            ).first()
+            if not exists:
+                session.add(ReportingPeriod(
+                    company_id=company.id,
+                    year=year,
+                    period="annual"
+                ))
+                created.append(year)
+
+        if created:
+            session.add(AuditLog(
+                action="setup_company",
+                scope="all",
+                status="success",
+                notes=f"Yeni donemler olusturuldu: {created}"
             ))
-
-        session.commit()
-        print("✅ UNSPED şirketi ve raporlama dönemleri (2023, 2024) oluşturuldu.")
-
-
-# ══════════════════════════════════════════════════════════════════
-# STEP 3 — SEED EMISSION FACTORS
-# ══════════════════════════════════════════════════════════════════
-
-def seed_emission_factors():
-    """
-    Load base emission factors into the database.
-
-    These are the starting values — the fetchers will update them
-    automatically from IPCC / DEFRA / TEİAŞ when run_update.py is used.
-
-    Unit conversions stored here:
-        Natural gas : m³  → ton  (density 0.000717 ton/m³)
-        Diesel      : L   → ton  (density 0.000832 ton/L)
-        Petrol      : L   → ton  (density 0.000745 ton/L)
-    """
-    with SessionLocal() as session:
-        if session.query(EmissionFactor).first():
-            print("ℹ️  Emisyon faktörleri zaten yüklü, atlanıyor.")
-            return
-
-        factors = [
-
-            # ── Scope 1 | 1.1 Sabit Yakma ──────────────────────────
-            EmissionFactor(
-                source="IPCC REF#3/REF#5", scope="scope1", category="1.1",
-                fuel_type="natural_gas", region="TR", unit="Ton/TJ",
-                co2_factor=56.1, ch4_factor=0.005, n2o_factor=0.0001,
-                gwp_ch4=29.8, gwp_n2o=273,
-                ncv=48, ncv_unit="TJ/Gg",
-                density=0.000717, density_unit="ton/m³",
-                input_unit="m³", valid_year=2024
-            ),
-            EmissionFactor(
-                source="IPCC REF#3/REF#5", scope="scope1", category="1.1",
-                fuel_type="diesel", region="TR", unit="Ton/TJ",
-                co2_factor=74.1, ch4_factor=0.01, n2o_factor=0.0006,
-                gwp_ch4=29.8, gwp_n2o=273,
-                ncv=43, ncv_unit="TJ/Gg",
-                density=0.000832, density_unit="ton/L",
-                input_unit="L", valid_year=2024
-            ),
-            EmissionFactor(
-                source="IPCC REF#3/REF#5", scope="scope1", category="1.1",
-                fuel_type="petrol", region="TR", unit="Ton/TJ",
-                co2_factor=69.3, ch4_factor=0.01, n2o_factor=0.0006,
-                gwp_ch4=29.8, gwp_n2o=273,
-                ncv=44.3, ncv_unit="TJ/Gg",
-                density=0.000745, density_unit="ton/L",
-                input_unit="L", valid_year=2024
-            ),
-
-            # ── Scope 1 | 1.2 Hareketli Yakma ──────────────────────
-            EmissionFactor(
-                source="IPCC REF#3/REF#5", scope="scope1", category="1.2",
-                fuel_type="petrol", region="TR", unit="Ton/TJ",
-                co2_factor=69.3, ch4_factor=0.01, n2o_factor=6e-05,
-                gwp_ch4=29.8, gwp_n2o=273,
-                ncv=44.3, ncv_unit="TJ/Gg",
-                density=0.000745, density_unit="ton/L",
-                input_unit="L", valid_year=2024
-            ),
-            EmissionFactor(
-                source="IPCC REF#3/REF#5", scope="scope1", category="1.2",
-                fuel_type="diesel", region="TR", unit="Ton/TJ",
-                co2_factor=74.1, ch4_factor=0.01, n2o_factor=6e-05,
-                gwp_ch4=29.8, gwp_n2o=273,
-                ncv=43, ncv_unit="TJ/Gg",
-                density=0.000832, density_unit="ton/L",
-                input_unit="L", valid_year=2024
-            ),
-
-            # ── Scope 2 | 2.1 Elektrik ──────────────────────────────
-            EmissionFactor(
-                source="TEİAŞ/EPDK REF#10", scope="scope2", category="2.1",
-                fuel_type="electricity", region="TR", unit="ton CO2e/MWh",
-                co2_factor=0.442, input_unit="MWh", valid_year=2023
-            ),
-            EmissionFactor(
-                source="TEİAŞ/EPDK REF#10", scope="scope2", category="2.1",
-                fuel_type="electricity", region="TR", unit="ton CO2e/MWh",
-                co2_factor=0.434, input_unit="MWh", valid_year=2024
-            ),
-
-            # ── Scope 3 | 3.3 Personel Ulaşım ───────────────────────
-            EmissionFactor(
-                source="IPCC REF#3/REF#5", scope="scope3", category="3.3",
-                fuel_type="petrol", region="TR", unit="Ton/TJ",
-                co2_factor=69.3, ch4_factor=0.01, n2o_factor=6e-05,
-                gwp_ch4=29.8, gwp_n2o=273,
-                ncv=44.3, ncv_unit="TJ/Gg",
-                density=0.000745, density_unit="ton/L",
-                input_unit="L", valid_year=2024
-            ),
-            EmissionFactor(
-                source="IPCC REF#3/REF#5", scope="scope3", category="3.3",
-                fuel_type="diesel", region="TR", unit="Ton/TJ",
-                co2_factor=74.1, ch4_factor=0.01, n2o_factor=6e-05,
-                gwp_ch4=29.8, gwp_n2o=273,
-                ncv=43, ncv_unit="TJ/Gg",
-                density=0.000832, density_unit="ton/L",
-                input_unit="L", valid_year=2024
-            ),
-            EmissionFactor(
-                source="IPCC REF#3/REF#5", scope="scope3", category="3.3",
-                fuel_type="diesel_shuttle", region="TR", unit="Ton/TJ",
-                co2_factor=74.1, ch4_factor=0.01, n2o_factor=6e-05,
-                gwp_ch4=29.8, gwp_n2o=273,
-                ncv=43, ncv_unit="TJ/Gg",
-                density=0.000832, density_unit="ton/L",
-                input_unit="L", valid_year=2024
-            ),
-        ]
-
-        for f in factors:
-            session.add(f)
-
-        session.add(AuditLog(
-            action="seed_emission_factors",
-            scope="all",
-            status="success",
-            notes=f"{len(factors)} emisyon faktörü yüklendi."
-        ))
-        session.commit()
-        print(f"✅ {len(factors)} emisyon faktörü yüklendi.")
+            session.commit()
+            print(f"OK  Raporlama donemleri olusturuldu: {created}")
+        else:
+            print(f"--  Tum donemler zaten mevcut: {years}")
 
 
 # ══════════════════════════════════════════════════════════════════
-# STEP 4 — CONFIRM SETUP
+# STEP 3 — SUMMARY
 # ══════════════════════════════════════════════════════════════════
 
 def show_summary():
-    """Print a summary confirming the DB is ready."""
     with SessionLocal() as session:
         companies = session.query(Company).all()
         periods   = session.query(ReportingPeriod).all()
-        factors   = session.query(EmissionFactor).all()
 
-        print("\n─────────────────────────────────────────")
-        print("       UNSPED KARBON SİSTEMİ — HAZIR     ")
-        print("─────────────────────────────────────────")
+        print("\n" + "="*50)
+        print("   UNSPED KARBON SISTEMI - HAZIR")
+        print("="*50)
+
         for c in companies:
-            print(f"  🏢 Şirket  : {c.name}")
-            print(f"  📍 Tesis   : {c.site}")
+            print(f"  Sirket  : {c.name}")
+            print(f"  Tesis   : {c.site}")
 
-        print(f"\n  📅 Raporlama Dönemleri:")
-        for p in periods:
-            status = "🔒 Kapalı" if p.is_closed else "🟢 Açık"
-            print(f"     {p.year} — {p.period} — {status}")
+        print(f"\n  Raporlama Donemleri:")
+        for p in sorted(periods, key=lambda x: x.year):
+            status = "Kapali" if p.is_closed else "Acik"
+            print(f"    {p.year}  {p.period}  {status}")
 
-        print(f"\n  📊 Emisyon Faktörleri ({len(factors)} adet):")
-        for f in factors:
-            print(f"     [{f.category}] {f.fuel_type:<18} "
-                  f"input: {str(f.input_unit):<5}  "
-                  f"co2_ef: {f.co2_factor}")
-
-        print("\n─────────────────────────────────────────")
-        print("  ✅ Kurulum tamamlandı. İmporter'ı çalıştırabilirsiniz:")
-        print("  python pipeline/importer.py data/UNSPED_Karbon_Veri_Girisi_v3.xlsx 2024")
-        print("─────────────────────────────────────────\n")
+        print(f"\n  Emisyon Faktorleri: Excel'den okunur")
+        print(f"  Bos yesil hucreler icin:")
+        print(f"    python run_update.py --excel data/UNSPED_Karbon_Veri_Girisi_v3.xlsx")
+        print(f"\n  Import icin:")
+        print(f"    python pipeline/Importer.py data/UNSPED_Karbon_Veri_Girisi_v3.xlsx")
+        print("="*50 + "\n")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -227,8 +149,7 @@ def show_summary():
 # ══════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    print("\n🚀 UNSPED Karbon Sistemi Kurulumu Başlıyor...\n")
+    print(f"\nUNSPED Karbon Sistemi Kurulumu - {datetime.now().year}\n")
     init_db()
     setup_company()
-    seed_emission_factors()
     show_summary()

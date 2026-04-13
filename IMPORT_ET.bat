@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul 2>&1
 title UNSPED - Excel Import
 
 echo.
@@ -33,9 +34,16 @@ python pipeline\Importer.py "%EXCEL%"
 echo.
 if errorlevel 1 (
     echo  [HATA] Import basarisiz!
-) else (
-    echo  [OK] Import tamamlandi!
-    echo  Sonuclar icin BASLAT.bat ile dashboard acin.
+    echo  Hata detayi icin yukaridaki mesajlara bakin.
+    pause
+    exit /b 1
+)
+
+echo  [OK] Import tamamlandi!
+echo.
+set /p OPEN="Dashboard acilsin mi? (e/h): "
+if /i "%OPEN%"=="e" (
+    python dashboard.py
 )
 echo.
 pause

@@ -1,72 +1,133 @@
-╔══════════════════════════════════════════════════════════╗
-║        UNSPED Karbon Ayak İzi Sistemi                   ║
-║        Kurulum ve Kullanım Kılavuzu                     ║
-╚══════════════════════════════════════════════════════════╝
+UNSPED Karbon Ayak Izi Sistemi
+Kurulum ve Kullanim Kilavuzu
 
-━━━ KLASÖR YAPISI ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━ KLASOR YAPISI ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 carbon_project/
-├── BASLAT.bat              ← Dashboard'u aç (çift tıkla!)
-├── GUNCELLE.bat            ← Emisyon faktörlerini güncelle
-├── IMPORT_ET.bat           ← Excel'i sisteme aktar
-├── BENIOKU.txt             ← Bu dosya
-├── dashboard.py            ← Dashboard (otomatik açılır)
-├── main.py                 ← İlk kurulum (BASLAT.bat yapar)
-├── run_update.py           ← Faktör güncelleme
+├── BASLAT.bat              <- Dashboardi ac (cift tikla!)
+├── GUNCELLE.bat            <- Emisyon faktorlerini guncelle
+├── IMPORT_ET.bat           <- Exceli sisteme aktar
+├── BENIOKU.txt             <- Bu dosya
+├── requirements.txt        <- Paket listesi (otomatik kullanilir)
+├── dashboard.py            <- Dashboard (otomatik acilir)
+├── main.py                 <- Ilk kurulum (BASLAT.bat yapar)
+├── run_update.py           <- Faktor guncelleme
 ├── data/
-│   └── UNSPED_Karbon_Veri_Girisi_v3.xlsx  ← Excel şablonu
+│   └── UNSPED_Karbon_Veri_Girisi_v3.xlsx  <- Excel sablonu
 ├── pipeline/
-│   └── Importer.py         ← Import motoru
+│   └── Importer.py         <- Import motoru
 ├── db/
 │   ├── connection.py
 │   └── models.py
-└── carbon.db               ← Veritabanı (otomatik oluşur)
+└── carbon.db               <- Veritabani (otomatik olusur)
 
-━━━ İLK KURULUM ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-1. Python kurulu değilse: https://www.python.org/downloads/
-   (Kurulum sırasında "Add python.exe to PATH" kutusunu işaretleyin!)
+━━━ SISTEM NASIL CALISIR ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-2. BASLAT.bat dosyasına çift tıklayın.
-   → Tüm paketler otomatik kurulur
-   → Veritabanı otomatik oluşturulur
-   → Dashboard açılır
+HUCRE RENKLERI (Excel sablonu):
+  MAVI   = Siz doldurun (olculen veri: tuketim, mesafe, miktar)
+  YESIL  = Otomatik dolar (emisyon faktorleri, GWP, NCV)
+  GRI    = Hesaplanan (CO2e sonuclari, dokunmayin)
+  SARI   = Toplam satirlar
 
-━━━ GÜNLÜK KULLANIM ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+VERI AKISI:
+  1. GUNCELLE.bat → internetten faktorleri ceker → YESIL hucreleri doldurur
+  2. Siz mavi hucreleri doldurursunuz
+  3. IMPORT_ET.bat → Excel okur → hesaplar → DB + gri hucreler
 
-Her gün / her kullanımda:
-   BASLAT.bat → çift tıkla → Dashboard açılır
+NOT: YESIL hucreler doluysa GUNCELLE.bat onlara dokunmaz.
+     Manuel girmek isterseniz uzerine yazabilirsiniz.
 
-━━━ YILLIK İŞ AKIŞI ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-1. Haziran-Temmuz'da:
-   GUNCELLE.bat → çift tıkla
-   (DEFRA yeni faktörlerini yayınlayınca otomatik indirir)
+━━━ ILK KURULUM ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-2. Veriler hazır olunca:
-   Excel şablonunu (data/ klasöründe) doldurun
-   MAVİ hücreleri siz doldurun
-   YEŞİL hücreler otomatik dolar
+1. Python kurulu degilse:
+   https://www.python.org/downloads/
+   Kurulum sirasinda "Add python.exe to PATH" kutusunu isaretle!
 
-3. Import:
-   IMPORT_ET.bat → çift tıkla
-   VEYA Dashboard'dan "Veri İmport" sayfasını kullanın
+2. BASLAT.bat dosyasina cift tiklayin.
+   Otomatik olarak:
+   → Paketler kurulur (sqlalchemy, pandas, openpyxl vs.)
+   → Veritabani olusturulur
+   → Excel yesil hucreleri doldurulur (internet gerekli)
+   → Dashboard acilir
 
-4. Sonuçlar:
-   Dashboard → "Sonuçlar & Grafik" sayfası
 
-━━━ SORUN GİDERME ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━ GUNLUK KULLANIM ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-"Python bulunamadı" hatası:
-→ https://www.python.org/downloads/ adresinden Python indirin
-→ Kurulum sırasında "Add python.exe to PATH" kutusunu işaretleyin
+Her kullanımda:
+   BASLAT.bat → cift tikla → Dashboard acilir
 
-"Paket kurulamadı" hatası:
-→ İnternet bağlantınızı kontrol edin
-→ Şirket güvenlik duvarı engelliyor olabilir
 
-"DB bağlantısı kurulamadı":
-→ carbon_project klasöründe BASLAT.bat'ı çalıştırın
-→ carbon.db dosyası otomatik oluşacak
+━━━ YILLIK IS AKISI ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ADIM 1 — Faktorleri guncelle (Haziran-Temmuz'da bir kez)
+   GUNCELLE.bat → cift tikla
+   Ne yapar:
+   - DEFRA yeni yil faktorlerini GOV.UK'dan indirir
+   - TEİAS/EVCED yeni yil aciklandiysa uyarir
+   - IPCC AR7 yayinlandiysa uyarir
+   - Excel bos yesil hucreleri doldurur
+
+ADIM 2 — Mavi hucreleri doldurun
+   Excel sablonunu acin: data\UNSPED_Karbon_Veri_Girisi_v3.xlsx
+   Her sayfada MAVI hucrelere olculen verileri girin:
+   - 1.1 Sabit Yakma      : dogalgaz/dizel/benzin tuketimi
+   - 1.2 Hareketli Yakma  : arac yakit tuketimi
+   - 1.4 Sogutucular      : kagak miktarlari
+   - 2.1 Elektrik         : kWh tuketimi
+   - 3.x / 4.x / 6.x     : sevkiyat, seyahat, atik vs.
+   - PERSONNEL            : lokasyon ve personel sayisi
+
+ADIM 3 — Import edin
+   IMPORT_ET.bat → cift tikla
+   VEYA Dashboard → "Veri Import" sayfasi
+
+ADIM 4 — Sonuclari inceleyin
+   Dashboard → "Sonuclar & Grafik" sayfasi
+   - Yillik grafik ve pasta grafik
+   - Yillara gore degisim trendi
+   - Etki analizi (%95 esigi)
+   - Kapsam 3 alt kategoriler
+   - Kisi basina emisyon
+
+
+━━━ REVIZYON SISTEMI ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Her import yeni bir revizyon olusturur:
+   2025-R1 = 2025 yilinin ilk importu
+   2025-R2 = duzeltme sonrasi ikinci import
+
+Dashboard → "Log & Revizyonlar" sayfasindan tum revizyonlari
+ve hangi revizyonun gecerli oldugunu gorebilirsiniz.
+
+
+━━━ SORUN GIDERME ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+"Python bulunamadi":
+→ https://www.python.org/downloads/
+→ Kurulumda "Add python.exe to PATH" isaretleyin
+
+"Paket kurulamadi":
+→ Internet baglantinizi kontrol edin
+→ Sirket guvenlik duvari engelliyor olabilir
+→ IT'den python.org ve pypi.org adreslerine izin isteyin
+
+"DB baglantisi kurulamadi":
+→ BASLAT.bat'i carbon_project klasorunde calistirin
+→ carbon.db otomatik olusacak
+
+"Excel bos yesil hucreler":
+→ GUNCELLE.bat calistirin (internet gerekli)
+→ Veya manuel olarak degerleri IPCC/EVCED kaynaklarindan girin
+
+"Import hatasi - KeyError yil":
+→ Excel'deki tum sayfalarda A sutunu gecerli yil (2024, 2025) olmali
+→ Efsane/not satirlari otomatik atlanir
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Teknik destek ve kaynak kodlar:
+   Emisyon faktorleri: IPCC 2006 GL, DEFRA, TC ETKB EVCED
+   Metodoloji: GHG Protocol Corporate Standard
+   Elektrik EF: enerji.gov.tr/evced
