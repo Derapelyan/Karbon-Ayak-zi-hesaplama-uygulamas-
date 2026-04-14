@@ -286,6 +286,7 @@ class UNSPEDDashboard(tk.Tk):
         self.nav_btns = {}
         menu = [("home","🏠","Ana Sayfa"),("import","📥","Veri İmport"),
                 ("update","🔄","Faktör Güncelle"),("results","📊","Sonuçlar & Grafik"),
+                ("export","📄","Word Rapor Export"),
                 ("refs","📚","Referans Tablolar"),("log","📋","Log & Revizyonlar")]
         for page, icon, label in menu:
             btn = tk.Button(self.sidebar, text=f"  {icon}  {label}",
@@ -312,6 +313,7 @@ class UNSPEDDashboard(tk.Tk):
                 w.destroy()
         {"home":self._page_home,"import":self._page_import,
          "update":self._page_update,"results":self._page_results,
+         "export":self._page_export,
          "refs":self._page_refs,"log":self._page_log
         }.get(page, self._page_home)()
 
@@ -332,6 +334,40 @@ class UNSPEDDashboard(tk.Tk):
     # ══════════════════════════════════════════════════════════════
     # ANA SAYFA
     # ══════════════════════════════════════════════════════════════
+    def _draw_home_kpi(self, parent):
+        """Ana sayfadaki KPI grafik kartları."""
+        try:
+            import matplotlib; matplotlib.use("TkAgg")
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+            import sys, os
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from chart_style import make_kpi
+
+            all_data = db_get_scope_totals()
+            if not all_data: return
+            years_data = filter_display_years(all_data)
+            years = sorted(years_data.keys())
+            if not years: return
+            k1v  = [years_data[y]["k1"]    for y in years]
+            k2v  = [years_data[y]["k2"]    for y in years]
+            k3v  = [years_data[y]["k3"]    for y in years]
+            totv = [years_data[y]["total"] for y in years]
+
+            fig = make_kpi(years, k1v, k2v, k3v, totv)
+            canvas = FigureCanvasTkAgg(fig, master=parent)
+            canvas.draw()
+            canvas.get_tk_widget().pack(fill="x")
+
+            # KPI vars'ı da güncelle (summary için)
+            if hasattr(self, 'kpi_vars'):
+                latest = years[-1]; d = years_data[latest]
+                self.kpi_vars.get('toplam', tk.StringVar()).set(f"{d['total']:.1f}")
+                self.kpi_vars.get('kapsam1',tk.StringVar()).set(f"{d['k1']:.1f}")
+                self.kpi_vars.get('kapsam2',tk.StringVar()).set(f"{d['k2']:.1f}")
+                self.kpi_vars.get('kapsam3',tk.StringVar()).set(f"{d['k3']:.1f}")
+        except Exception as e:
+            pass  # Grafik yoksa sessizce geç
+
     def _page_home(self):
         outer = tk.Frame(self.content, bg=C["bg"])
         outer.pack(fill="both", expand=True)
@@ -344,25 +380,12 @@ class UNSPEDDashboard(tk.Tk):
         tk.Label(pad, text="GHG Protocol tabanlı raporlama sistemi",
                  font=FONT, bg=C["bg"], fg=C["muted"]).pack(anchor="w", pady=(0,16))
 
-        # KPI kartları
-        kpi_frame = tk.Frame(pad, bg=C["bg"]); kpi_frame.pack(fill="x", pady=(0,16))
+        # KPI grafik — chart_style.py
         self.kpi_vars = {}
-        for key, label, color in [("toplam","Toplam CO2e",C["blue"]),
-                                   ("kapsam1","Kapsam 1",C["s1"]),
-                                   ("kapsam2","Kapsam 2",C["s2"]),
-                                   ("kapsam3","Kapsam 3",C["s3"])]:
-            c = tk.Frame(kpi_frame, bg=C["card"],
-                         highlightbackground=C["border"], highlightthickness=1)
-            c.pack(side="left", fill="both", expand=True, padx=(0,12))
-            tk.Frame(c, bg=color, height=4).pack(fill="x")
-            inner = tk.Frame(c, bg=C["card"], padx=16, pady=14); inner.pack(fill="both")
-            tk.Label(inner, text=label, font=FONT_SMALL,
-                     bg=C["card"], fg=C["muted"]).pack(anchor="w")
-            var = tk.StringVar(value="—"); self.kpi_vars[key] = var
-            tk.Label(inner, textvariable=var, font=FONT_LARGE,
-                     bg=C["card"], fg=color).pack(anchor="w")
-            tk.Label(inner, text="ton CO2e", font=FONT_SMALL,
-                     bg=C["card"], fg=C["muted"]).pack(anchor="w")
+        kpi_canvas_frame = tk.Frame(pad, bg=C["bg"])
+        kpi_canvas_frame.pack(fill="x", pady=(0,12))
+        self._home_kpi_frame = kpi_canvas_frame
+        self._draw_home_kpi(kpi_canvas_frame)
 
         # Hızlı işlemler
         section_label(pad, "Hızlı İşlemler")
@@ -638,191 +661,123 @@ class UNSPEDDashboard(tk.Tk):
         }.get(self.res_tab.get(), self._res_chart)()
 
     def _res_chart(self):
+        """Grouped Bar + Donut — chart_style.py stilinde."""
         try:
             import matplotlib; matplotlib.use("TkAgg")
-            from matplotlib.figure import Figure
-            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+            import matplotlib.pyplot as plt
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+            import sys, os
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from chart_style import make_chart1, PAL
 
             all_data   = db_get_scope_totals()
             if not all_data: no_data_label(self.res_content); return
             years_data = filter_display_years(all_data)
-
             years = sorted(years_data.keys())
             k1v   = [years_data[y]["k1"]    for y in years]
             k2v   = [years_data[y]["k2"]    for y in years]
             k3v   = [years_data[y]["k3"]    for y in years]
-            x     = list(range(len(years)))
-            w     = 0.25
+            totv  = [years_data[y]["total"] for y in years]
 
-            fig = Figure(figsize=(12,5.5), facecolor=C["bg"])
-
-            # Sol — grouped bar
-            ax1 = fig.add_subplot(121)
-            ax1.bar([i-w for i in x], k1v, w, label="Kapsam 1",
-                    color=C["s1"], alpha=0.85)
-            ax1.bar([i   for i in x], k2v, w, label="Kapsam 2",
-                    color=C["s2"], alpha=0.85)
-            ax1.bar([i+w for i in x], k3v, w, label="Kapsam 3",
-                    color=C["s3"], alpha=0.85)
-            # Değerleri bar üstüne yaz
-            for i in x:
-                for v, offset in [(k1v[i],-w),(k2v[i],0),(k3v[i],w)]:
-                    if v > 0:
-                        ax1.text(i+offset, v+2, f"{v:.0f}",
-                                 ha="center", va="bottom", fontsize=7)
-            ax1.set_xticks(x); ax1.set_xticklabels(years, fontsize=9)
-            ax1.set_ylabel("ton CO2e", fontsize=9)
-            ax1.set_title("Yıllık Kapsam Karşılaştırması",
-                          fontsize=10, fontweight="bold")
-            ax1.legend(fontsize=8); ax1.set_facecolor(C["bg"])
-            ax1.spines["top"].set_visible(False)
-            ax1.spines["right"].set_visible(False)
-            ax1.grid(axis="y", alpha=0.3)
-
-            # Sağ — pasta (en son yıl)
-            ax2 = fig.add_subplot(122)
-            latest = max(years_data.keys()); d = years_data[latest]
-            vals   = [(d["k1"],"Kapsam 1",C["s1"]),
-                      (d["k2"],"Kapsam 2",C["s2"]),
-                      (d["k3"],"Kapsam 3",C["s3"])]
-            nz = [(v,l,c) for v,l,c in vals if v > 0]
-            if nz:
-                vv, ll, cc = zip(*nz)
-                wedges, texts, autotexts = ax2.pie(
-                    vv,
-                    labels=[f"{l}\n{v:.1f}t" for v,l,c in nz],
-                    colors=cc,
-                    autopct=lambda p: f"{p:.1f}%" if p > 3 else "",
-                    startangle=90,
-                    pctdistance=0.75,
-                    labeldistance=1.18,
-                    textprops={"fontsize":8},
-                    wedgeprops={"linewidth":1,"edgecolor":"white"}
-                )
-                for at in autotexts: at.set_fontsize(8)
-                # Çok küçük dilimlere metin pozisyonunu düzelt
-                for text, wedge in zip(texts, wedges):
-                    angle = (wedge.theta1 + wedge.theta2) / 2
-                    import numpy as np
-                    x = 1.3 * np.cos(np.radians(angle))
-                    y = 1.3 * np.sin(np.radians(angle))
-                    text.set_position((x, y))
-            ax2.set_title(f"{latest} Dağılımı\nToplam: {d['total']:.1f} ton CO2e",
-                          fontsize=10, fontweight="bold")
-            ax2.set_facecolor(C["bg"])
-            fig.tight_layout(pad=2)
-
+            fig = make_chart1(years, k1v, k2v, k3v, totv)
             canvas = FigureCanvasTkAgg(fig, master=self.res_content)
-            canvas.draw(); canvas.get_tk_widget().pack(fill="both", expand=True)
+            canvas.draw()
+            # Toolbar — zoom, pan, kaydet
+            toolbar_frame = tk.Frame(self.res_content, bg=C["bg"])
+            toolbar_frame.pack(fill="x")
+            toolbar = NavigationToolbar2Tk(canvas, toolbar_frame)
+            toolbar.update()
+            canvas.get_tk_widget().pack(fill="both", expand=True)
         except ImportError:
-            no_data_label(self.res_content, "Grafik için: pip install matplotlib")
+            no_data_label(self.res_content, "pip install matplotlib")
+        except Exception as e:
+            no_data_label(self.res_content, f"Grafik hatası: {e}")
 
     def _res_trend(self):
+        """Stacked Bar + Toplam Trend — interaktif."""
         try:
             import matplotlib; matplotlib.use("TkAgg")
-            from matplotlib.figure import Figure
-            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+            import matplotlib.pyplot as plt
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+            import sys, os
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from chart_style import make_chart2, PAL
 
             all_data   = db_get_scope_totals()
             if not all_data: no_data_label(self.res_content); return
             years_data = filter_display_years(all_data)
-            if len(years_data) < 1: no_data_label(self.res_content,"En az 1 yıl verisi gerekli."); return
+            years = sorted(years_data.keys())
+            k1v   = [years_data[y]["k1"]    for y in years]
+            k2v   = [years_data[y]["k2"]    for y in years]
+            k3v   = [years_data[y]["k3"]    for y in years]
+            totv  = [years_data[y]["total"] for y in years]
+
+            fig = make_chart2(years, k1v, k2v, k3v, totv)
+            canvas = FigureCanvasTkAgg(fig, master=self.res_content)
+            canvas.draw()
+            toolbar_frame = tk.Frame(self.res_content, bg=C["bg"])
+            toolbar_frame.pack(fill="x")
+            toolbar = NavigationToolbar2Tk(canvas, toolbar_frame)
+            toolbar.update()
+            canvas.get_tk_widget().pack(fill="both", expand=True)
+        except ImportError:
+            no_data_label(self.res_content, "pip install matplotlib")
+        except Exception as e:
+            no_data_label(self.res_content, f"Grafik hatası: {e}")
+
+    def _res_table(self):
+        """Kapsam Tablosu + KPI grafik."""
+        all_data   = db_get_scope_totals()
+        years_data = filter_display_years(all_data)
+        if not years_data: no_data_label(self.res_content); return
+
+        # KPI grafik üstte
+        try:
+            import matplotlib; matplotlib.use("TkAgg")
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+            import sys, os
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from chart_style import make_kpi
 
             years = sorted(years_data.keys())
             k1v   = [years_data[y]["k1"]    for y in years]
             k2v   = [years_data[y]["k2"]    for y in years]
             k3v   = [years_data[y]["k3"]    for y in years]
-            tot   = [years_data[y]["total"] for y in years]
+            totv  = [years_data[y]["total"] for y in years]
 
-            fig = Figure(figsize=(12,5.5), facecolor=C["bg"])
+            fig_kpi = make_kpi(years, k1v, k2v, k3v, totv)
+            c_kpi   = FigureCanvasTkAgg(fig_kpi, master=self.res_content)
+            c_kpi.draw()
+            c_kpi.get_tk_widget().pack(fill="x", pady=(0,4))
+        except Exception:
+            pass
 
-            # Sol — çizgi grafik
-            ax1 = fig.add_subplot(121)
-            for vals, marker, color, label in [
-                (k1v,"o",C["s1"],"Kapsam 1"),
-                (k2v,"s",C["s2"],"Kapsam 2"),
-                (k3v,"^",C["s3"],"Kapsam 3"),
-                (tot,"D",C["blue"],"Toplam"),
-            ]:
-                ax1.plot(years, vals, f"{marker}-", color=color,
-                         linewidth=2, markersize=7, label=label,
-                         alpha=0.7 if label=="Toplam" else 1.0)
-                for i, (y, v) in enumerate(zip(years, vals)):
-                    if v > 0:
-                        ax1.annotate(f"{v:.0f}", (y, v),
-                                     textcoords="offset points",
-                                     xytext=(0,7), fontsize=7, color=color,
-                                     ha="center")
-            ax1.set_title("Yıllara Göre Değişim Trendi",
-                          fontsize=10, fontweight="bold")
-            ax1.set_ylabel("ton CO2e", fontsize=9)
-            ax1.legend(fontsize=8); ax1.set_facecolor(C["bg"])
-            ax1.spines["top"].set_visible(False)
-            ax1.spines["right"].set_visible(False)
-            ax1.grid(axis="y", alpha=0.3)
-
-            # Sağ — yığılmış bar + yüzde değişimi
-            ax2 = fig.add_subplot(122)
-            xi = list(range(len(years)))
-            ax2.bar(xi, k1v, label="Kapsam 1", color=C["s1"], alpha=0.85)
-            ax2.bar(xi, k2v, bottom=k1v, label="Kapsam 2", color=C["s2"], alpha=0.85)
-            k12 = [a+b for a,b in zip(k1v,k2v)]
-            ax2.bar(xi, k3v, bottom=k12, label="Kapsam 3", color=C["s3"], alpha=0.85)
-
-            xlabels = []
-            for i, y in enumerate(years):
-                if i == 0:
-                    xlabels.append(y)
-                else:
-                    prev = tot[i-1]; curr = tot[i]
-                    if prev > 0:
-                        pct = (curr-prev)/prev*100
-                        arrow = "▲" if pct > 0 else "▼"
-                        xlabels.append(f"{y}\n{arrow}{abs(pct):.1f}%")
-                    else:
-                        xlabels.append(y)
-            ax2.set_xticks(xi); ax2.set_xticklabels(xlabels, fontsize=8)
-            ax2.set_title("Yığılmış Toplam", fontsize=10, fontweight="bold")
-            ax2.set_ylabel("ton CO2e", fontsize=9)
-            ax2.legend(fontsize=8); ax2.set_facecolor(C["bg"])
-            ax2.spines["top"].set_visible(False)
-            ax2.spines["right"].set_visible(False)
-
-            fig.tight_layout(pad=2)
-            canvas = FigureCanvasTkAgg(fig, master=self.res_content)
-            canvas.draw(); canvas.get_tk_widget().pack(fill="both", expand=True)
-        except ImportError:
-            no_data_label(self.res_content,"pip install matplotlib")
-
-    def _res_table(self):
-        years_data = filter_display_years(db_get_scope_totals())
-        if not years_data: no_data_label(self.res_content); return
+        # Detay tablosu
         cols = ["Yıl","Kapsam 1","Kapsam 2","Kapsam 3","Toplam"]
-        tree = make_treeview(self.res_content, cols, [80,160,160,160,160], height=15)
-        tree.tag_configure("total", background=C["warning"], font=FONT_BOLD)
+        tree = make_treeview(self.res_content, cols,
+                             [80,160,160,160,160], height=10)
+        tree.tag_configure("total",   background=C["warning"], font=FONT_BOLD)
+        tree.tag_configure("detail",  background=C["bg"])
+
+        cat_labels = {
+            "1.1":"  1.1 Sabit Yanma","1.2":"  1.2 Hareketli Yakma",
+            "1.4":"  1.4 Soğutucu Gaz","2.1":"  2.1 Elektrik",
+            "3.3":"  3.3 Personel Ulaşım","3.5":"  3.5 Uçak/Konaklama",
+            "4.1":"  4.1 Satın Alınan","4.2":"  4.2 Sermaye",
+            "4.3":"  4.3 Atık","4.5":"  4.5 Hizmetler","6.1":"  6.1 T&D",
+        }
         for y in sorted(years_data.keys()):
-            d = years_data[y]
+            d = years_data[y]; cats = d.get("cats",{})
             tree.insert("","end",
                 values=(y, f"{d['k1']:.2f}", f"{d['k2']:.2f}",
                         f"{d['k3']:.2f}", f"{d['total']:.2f}"),
                 tags=("total",))
-            # Alt kategoriler
-            cats = d.get("cats", {})
-            cat_labels = {
-                "1.1":"  1.1 Sabit Yakma","1.2":"  1.2 Hareketli Yakma",
-                "1.4":"  1.4 Soğutucu Gaz","2.1":"  2.1 Elektrik",
-                "3.1":"  3.1 Hammadde Svk","3.2":"  3.2 Ürün Svk",
-                "3.3":"  3.3 Personel Ulş","3.4":"  3.4 İş Seyahati",
-                "3.5":"  3.5 Uçak & Konal","4.1":"  4.1 Satın Alınan",
-                "4.2":"  4.2 Sermaye Varl","4.3":"  4.3 Atık",
-                "4.4":"  4.4 Kiralanan","4.5":"  4.5 Hizmetler",
-                "6.1":"  6.1 T&D Kayıpları",
-            }
             for k, label in cat_labels.items():
                 v = cats.get(k, 0)
                 if v > 0:
                     tree.insert("","end",
-                        values=(label, "", "", "", f"{v:.4f}"))
+                        values=(label,"","","",f"{v:.4f}"),
+                        tags=("detail",))
 
     def _res_impact(self):
         """
@@ -1139,6 +1094,305 @@ class UNSPEDDashboard(tk.Tk):
                       "Tüketim EF = şebekeden alınan elektrik (T&D dahil).",
                  font=FONT_SMALL, bg=C["card"], fg=C["muted"],
                  wraplength=900, justify="left").pack(anchor="w", pady=(8,0))
+
+    # ══════════════════════════════════════════════════════════════
+    # WORD RAPOR EXPORT
+    # ══════════════════════════════════════════════════════════════
+    def _page_export(self):
+        outer = tk.Frame(self.content, bg=C["bg"])
+        outer.pack(fill="both", expand=True)
+        frame = self._scrollable(outer)
+        pad = tk.Frame(frame, bg=C["bg"])
+        pad.pack(fill="both", expand=True, padx=24, pady=20)
+
+        tk.Label(pad, text="Word Rapor Export", font=FONT_TITLE,
+                 bg=C["bg"], fg=C["text"]).pack(anchor="w")
+        tk.Label(pad, text="Seçtiğiniz yıllar ve bölümleri Word dosyasına aktarın",
+                 font=FONT, bg=C["bg"], fg=C["muted"]).pack(anchor="w", pady=(0,16))
+
+        # ── Yıl seçimi ────────────────────────────────────────────
+        yi = card(pad, "Yılları Seçin")
+        all_data = db_get_scope_totals()
+        all_years = sorted(all_data.keys()) if all_data else []
+
+        self.export_year_vars = {}
+        if all_years:
+            yf = tk.Frame(yi, bg=C["card"]); yf.pack(fill="x")
+            for y in all_years:
+                v = tk.BooleanVar(value=True)
+                self.export_year_vars[y] = v
+                tk.Checkbutton(yf, text=y, variable=v, font=FONT,
+                               bg=C["card"], fg=C["text"],
+                               activebackground=C["card"]
+                               ).pack(side="left", padx=8)
+        else:
+            tk.Label(yi, text="Henüz import edilmiş veri yok.",
+                     font=FONT, bg=C["card"], fg=C["muted"]).pack(anchor="w")
+
+        # ── Bölüm seçimi ──────────────────────────────────────────
+        si = card(pad, "Rapor Bölümleri")
+        self.export_sec_vars = {}
+        sections = [
+            ("intro",           "📝  Giriş"),
+            ("technical",       "⚙️   Bölüm 1: Teknik Bilgiler (metodoloji kısa metin)"),
+            ("boundaries",      "🏢  Bölüm 2-3: Kuruluş ve Raporlama Sınırları"),
+            ("scope1",          "🔵  Bölüm 4.1: Kapsam 1 — Doğrudan Emisyonlar"),
+            ("scope2",          "🟢  Bölüm 4.2: Kapsam 2 — Elektrik"),
+            ("scope3",          "🟠  Bölüm 4.3: Kapsam 3 — Dolaylı Emisyonlar"),
+            ("activity",        "📋  Bölüm 4.3.1: Faaliyet Verileri (%95 eşiği)"),
+            ("charts",          "📈  Bölüm 4.5: Grafikler (Bar + Pasta + Trend)"),
+            ("summary",         "📊  Bölüm 4.4: Kapsamlara Göre Özet Tablo"),
+            ("impact",          "🎯  Bölüm 4.6: Etki Analizi — %95 (metin)"),
+            ("percap",          "👤  Bölüm 4.7: Kişi Başına Emisyon"),
+            ("yearly",          "📅  Bölüm 5: Yıllara Göre GHG Verileri"),
+            ("ghg_declaration", "📋  Bölüm 5: GHG Emisyon Beyanı (ISO 14064-1)"),
+            ("conclusion",      "✅  Bölüm 6: Sonuç Tablosu"),
+            ("recommendations", "💡  Bölüm 7: Öneriler"),
+            ("methodology",     "📚  Bölüm 8-9: Metodoloji + NKD + GWP + EF Tabloları"),
+        ]
+        for key, label in sections:
+            v = tk.BooleanVar(value=True)
+            self.export_sec_vars[key] = v
+            tk.Checkbutton(si, text=label, variable=v, font=FONT,
+                           bg=C["card"], fg=C["text"],
+                           activebackground=C["card"]
+                           ).pack(anchor="w", pady=2)
+
+        # ── Excel dosyası (kişi başına için) ──────────────────────
+        ei = card(pad, "Excel Dosyası (Kişi Başına bölümü için gerekli)")
+        er = tk.Frame(ei, bg=C["card"]); er.pack(fill="x")
+        tk.Entry(er, textvariable=self.excel_path, font=FONT,
+                 width=50, relief="solid", bd=1).pack(side="left", padx=(0,8))
+        tk.Button(er, text="Gözat...", font=FONT, bg=C["blue"], fg="white",
+                  relief="flat", padx=10, pady=3, cursor="hand2",
+                  command=self._browse_excel).pack(side="left")
+
+        # ── Export butonu ─────────────────────────────────────────
+        bf = tk.Frame(pad, bg=C["bg"]); bf.pack(fill="x", pady=12)
+        self.export_btn = tk.Button(bf,
+            text="📄  Word Rapor Oluştur",
+            font=FONT_BOLD, bg=C["blue"], fg="white",
+            relief="flat", padx=24, pady=12, cursor="hand2",
+            command=self._run_export)
+        self.export_btn.pack(side="left")
+
+        # ── Log ───────────────────────────────────────────────────
+        section_label(pad, "Durum")
+        self.export_log = tk.Text(pad, height=8, font=FONT_MONO,
+                                  bg=C["card"], fg=C["text"], relief="flat",
+                                  state="disabled",
+                                  highlightbackground=C["border"], highlightthickness=1)
+        self.export_log.pack(fill="x")
+        self._export_log("Ayarları seçin ve 'Word Rapor Oluştur' butonuna tıklayın.")
+
+    def _export_log(self, msg):
+        try:
+            self.export_log.configure(state="normal")
+            self.export_log.insert("end", msg + "\n")
+            self.export_log.see("end")
+            self.export_log.configure(state="disabled")
+        except: pass
+
+    def _run_export(self):
+        import json, subprocess, tempfile
+        from datetime import datetime
+
+        selected_years = [y for y, v in self.export_year_vars.items() if v.get()]
+        selected_secs  = [k for k, v in self.export_sec_vars.items() if v.get()]
+
+        if not selected_years:
+            messagebox.showwarning("Uyarı","En az bir yıl seçin."); return
+        if not selected_secs:
+            messagebox.showwarning("Uyarı","En az bir bölüm seçin."); return
+
+        self.export_btn.configure(state="disabled", text="⏳  Oluşturuluyor...")
+        self.export_log.configure(state="normal")
+        self.export_log.delete("1.0","end")
+        self.export_log.configure(state="disabled")
+
+        def run():
+            try:
+                self.after(0, lambda: self._export_log("Veriler DB'den okunuyor..."))
+
+                all_data = db_get_scope_totals()
+                if not all_data:
+                    self.after(0, lambda: self._export_log("HATA: DB boş."))
+                    self.after(0, lambda: self.export_btn.configure(
+                        state="normal", text="📄  Word Rapor Oluştur"))
+                    return
+
+                # Seçili yılları filtrele
+                scope_totals = {y: all_data[y] for y in selected_years if y in all_data}
+                cats_data    = {y: all_data[y]["cats"] for y in selected_years if y in all_data}
+
+                # Kişi başına veri (Excel'den)
+                per_capita = []
+                excel = self.excel_path.get().strip()
+                if excel and os.path.exists(excel) and "percap" in selected_secs:
+                    try:
+                        from openpyxl import load_workbook
+                        wb  = load_workbook(excel, read_only=True, data_only=True)
+                        ws  = wb['PERSONNEL']
+                        personnel_by_year = {}
+                        for row in ws.iter_rows(min_row=4, values_only=True):
+                            if not row[0] or not row[1] or not row[2]: continue
+                            try:
+                                year = str(int(float(str(row[0]))))
+                                if year not in selected_years: continue
+                                personnel_by_year.setdefault(year,[]).append({
+                                    "location": str(row[1]).strip(),
+                                    "headcount": int(float(str(row[2])))
+                                })
+                            except: continue
+
+                        for year in selected_years:
+                            if year not in personnel_by_year: continue
+                            if year not in all_data: continue
+                            personnel = personnel_by_year[year]
+                            d = all_data[year]
+                            total_head = sum(p["headcount"] for p in personnel)
+                            if not total_head: continue
+                            for p in personnel:
+                                ratio = p["headcount"] / total_head
+                                lt = round((d["k1"]+d["k2"]+d["k3"])*ratio, 4)
+                                per_capita.append({
+                                    "year": year,
+                                    "location": p["location"],
+                                    "headcount": p["headcount"],
+                                    "k1": round(d["k1"]*ratio, 4),
+                                    "k2": round(d["k2"]*ratio, 4),
+                                    "k3": round(d["k3"]*ratio, 4),
+                                    "total": lt,
+                                    "per_cap": round(lt/p["headcount"],6) if p["headcount"] else 0,
+                                    "is_total": False
+                                })
+                            per_capita.append({
+                                "year": year,
+                                "location": f"ŞİRKET TOPLAMI ({year})",
+                                "headcount": total_head,
+                                "k1": round(d["k1"],4), "k2": round(d["k2"],4),
+                                "k3": round(d["k3"],4), "total": round(d["total"],4),
+                                "per_cap": round(d["total"]/total_head,6),
+                                "is_total": True
+                            })
+                    except Exception as pe:
+                        self.after(0, lambda: self._export_log(
+                            f"Uyarı: Kisi basina veri okunamadi: {pe}"))
+
+                # Alt kategori detayları DB'den çek
+                detail_data = {}
+                try:
+                    from db.connection import SessionLocal
+                    from db.models import (StationaryCombustion, MobileCombustion,
+                                          Refrigerant, ElectricityConsumption,
+                                          FreightEmission, EmployeeCommuting,
+                                          PurchasedGoods, CapitalGoods, ReportingPeriod)
+                    with SessionLocal() as s:
+                        for year in selected_years:
+                            period = s.query(ReportingPeriod).filter_by(year=int(year)).first()
+                            if not period: continue
+                            pid = period.id
+                            detail_data[year] = {
+                                "stationary": [
+                                    {"source": r.emission_source, "fuel": r.fuel_type,
+                                     "value": r.activity_value, "unit": r.activity_unit,
+                                     "co2e": round(r.co2e_total or 0, 4)}
+                                    for r in s.query(StationaryCombustion).filter_by(period_id=pid).all()
+                                ],
+                                "mobile": [
+                                    {"source": r.emission_source, "fuel": r.fuel_type,
+                                     "value": r.activity_value, "unit": r.activity_unit,
+                                     "co2e": round(r.co2e_total or 0, 4)}
+                                    for r in s.query(MobileCombustion).filter_by(period_id=pid).all()
+                                ],
+                                "refrigerant": [
+                                    {"source": r.gas_type, "fuel": r.gas_type,
+                                     "value": r.activity_value, "unit": r.activity_unit,
+                                     "co2e": round(r.co2e_total or 0, 4)}
+                                    for r in s.query(Refrigerant).filter_by(period_id=pid).all()
+                                ],
+                            }
+                except Exception as de:
+                    detail_data = {}
+
+                # JSON data dosyası
+                report_data = {
+                    "years": selected_years,
+                    "scope_totals": scope_totals,
+                    "cats": cats_data,
+                    "detail": detail_data,
+                    "per_capita": per_capita,
+                    "company": "UNSPED",
+                    "generated_at": datetime.now().strftime("%d.%m.%Y"),
+                    "selected_sections": selected_secs
+                }
+
+                tmp_json = os.path.join(tempfile.gettempdir(), "unsped_report_data.json")
+                with open(tmp_json, "w", encoding="utf-8") as f:
+                    json.dump(report_data, f, ensure_ascii=False)
+
+                self.after(0, lambda: self._export_log("Word raporu oluşturuluyor..."))
+
+                # Python script yolu
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                py_script  = os.path.join(script_dir, "word_export", "generate_report.py")
+
+                if not os.path.exists(py_script):
+                    self.after(0, lambda: self._export_log(
+                        "HATA: generate_report.py bulunamadi.\n"
+                        "word_export klasorunu kontrol edin."))
+                    self.after(0, lambda: self.export_btn.configure(
+                        state="normal", text="📄  Word Rapor Oluştur"))
+                    return
+
+                # Kaydetme yeri seç
+                out_path = filedialog.asksaveasfilename(
+                    title="Raporu Kaydet",
+                    defaultextension=".docx",
+                    initialfile=f"UNSPED_Karbon_Raporu_{'-'.join(selected_years)}.docx",
+                    filetypes=[("Word Belgesi","*.docx"),("Tüm","*.*")]
+                )
+                if not out_path:
+                    self.after(0, lambda: self.export_btn.configure(
+                        state="normal", text="📄  Word Rapor Oluştur"))
+                    return
+
+                # Python ile rapor oluştur (Node.js gerekmez)
+                result = subprocess.run(
+                    [sys.executable, py_script, tmp_json, out_path],
+                    capture_output=True, text=True, timeout=120,
+                    cwd=script_dir
+                )
+
+                if result.returncode == 0 and os.path.exists(out_path):
+                    size_kb = os.path.getsize(out_path) // 1024
+                    self.after(0, lambda: self._export_log(
+                        f"Basarili! {out_path} ({size_kb} KB)"))
+                    self.after(0, lambda p=out_path, sy=selected_years, ss=selected_secs:
+                        messagebox.showinfo(
+                        "Tamamlandı",
+                        f"Word raporu olusturuldu!\n\n"
+                        f"Yillar: {', '.join(sy)}\n"
+                        f"Bolumler: {len(ss)} bolum\n"
+                        f"Dosya: {os.path.basename(p)}"
+                    ))
+                    try:
+                        import subprocess as sp
+                        sp.Popen(["start", "", out_path], shell=True)
+                    except: pass
+                else:
+                    err_out = (result.stderr or "") + (result.stdout or "")
+                    err = err_out[:600] if err_out.strip() else "Bilinmeyen hata"
+                    self.after(0, lambda e=err: self._export_log("HATA:\n" + str(e)))
+
+            except Exception as e:
+                import traceback
+                self.after(0, lambda: self._export_log(f"HATA: {traceback.format_exc()[:300]}"))
+            finally:
+                self.after(0, lambda: self.export_btn.configure(
+                    state="normal", text="📄  Word Rapor Oluştur"))
+
+        threading.Thread(target=run, daemon=True).start()
 
     # ══════════════════════════════════════════════════════════════
     # LOG & REVİZYONLAR

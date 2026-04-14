@@ -1,6 +1,13 @@
+# UNSPED Karbon Ayak Izi Sistemi — Python Gereksinimleri
+# Kurulum: pip install -r requirements.txt
+#
+# Word export python-docx ile yapilir — Node.js GEREKMEZ
+# ─────────────────────────────────────────────────────
+
 sqlalchemy
 pandas
 openpyxl
+python-docx
 requests
 beautifulsoup4
 matplotlib
